@@ -1,35 +1,48 @@
 version: '3'
 services:
-  mysql:
-    image: mysql:${MYSQL_VERSION}
-    container_name: mysql
+  db:
+    image: postgres
+    container_name: postgresql
     restart: always
     volumes:
-      - "${DATA_DIR}/mysql:/var/lib/mysql"
-    environment: 
-      MYSQL_ROOT_PASSWORD: nopassword
+      - "${DATA_DIR}/postgres:/var/lib/postgresql/data"
+    environment:
+      POSTGRES_PASSWORD: nextcloud
+      POSTGRES_DB: somethingelse
+      POSTGRES_USER: nextcloud
 
-  nextcloud:
+  app:
     image: nextcloud:${NEXTCLOUD_VERSION}
     container_name: nextcloud
     restart: always
     volumes:
       - "${DATA_DIR}/nextcloud:/var/www/html"
-      - "${DATA_DIR}/mysql:/var/lib/mysql"
-    links:
-      - mysql:mysql
     environment:
-      MYSQL_HOST: mysql
-      MYSQL_DATABASE: nextcloud
-      MYSQL_USER: root
-      MYSQL_PASSWORD: nopassword
+      POSTGRES_HOST: db
+      POSTGRES_PASSWORD: nextcloud
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud     
+    depends_on:
+      - db
+
+  web:
+    build: ./web
+    container_name: nginx
+    restart: always
+    volumes:
+      - "${DATA_DIR}/nextcloud:/var/www/html:ro"
+    environment: 
       VIRTUAL_HOST: ${HOST}
       LETSENCRYPT_HOST: ${HOST}
+      LETSENCRYPT_EMAIL: ${EMAIL}
     depends_on:
-      - mysql
+      - app
+    networks:
+      - proxy-tier
+      - default
 
-  reverse-proxy:
-    image: jwilder/nginx-proxy:alpine
+  proxy:
+    build: ./proxy
     container_name: nginx-proxy
     restart: always
     ports:
@@ -41,8 +54,10 @@ services:
       - "${DATA_DIR}/nginx/certs:/etc/nginx/certs:ro"
       - "${DATA_DIR}/nginx/vhosts:/etc/nginx/vhost.d"
       - "${DATA_DIR}/nginx/html:/usr/share/nginx/html"
-      - ./nginx.conf:/etc/nginx/proxy.conf
+#      - ./nginx.conf:/etc/nginx/proxy.conf
       - /var/run/docker.sock:/tmp/docker.sock:ro
+    networks:
+      - proxy-tier
 
   letsencrypt-companion:
     image: jrcs/letsencrypt-nginx-proxy-companion
@@ -53,19 +68,24 @@ services:
       - "${DATA_DIR}/nginx/vhosts:/etc/nginx/vhost.d"
       - "${DATA_DIR}/nginx/html:/usr/share/nginx/html"
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - proxy-tier
     depends_on:
-      - reverse-proxy
+      - proxy
 
-  backups:
-    image: christophetd/duplicacy-autobackup:v1.0
-    container_name: backups
-    restart: always
-    environment:
-      BACKUP_NAME: "${BACKUP_NAME}"
-      BACKUP_LOCATION: "b2://${B2_BUCKET}"
-      BACKUP_SCHEDULE: "${BACKUP_SCHEDULE}"
-      BACKUP_ENCRYPTION_KEY: "${BACKUP_ENCRYPTION_KEY}"
-      B2_ID: "${B2_ID}"
-      B2_KEY: "${B2_KEY}"
-    volumes:
-      - "${DATA_DIR}:/data"
+#  backups:
+#    image: christophetd/duplicacy-autobackup:v1.0
+#    container_name: backups
+#    restart: always
+#    environment:
+#      BACKUP_NAME: "${BACKUP_NAME}"
+#      BACKUP_LOCATION: "b2://${B2_BUCKET}"
+#      BACKUP_SCHEDULE: "${BACKUP_SCHEDULE}"
+#      BACKUP_ENCRYPTION_KEY: "${BACKUP_ENCRYPTION_KEY}"
+#      B2_ID: "${B2_ID}"
+#      B2_KEY: "${B2_KEY}"
+#    volumes:
+#      - "${DATA_DIR}:/data"
+
+networks:
+  proxy-tier:
